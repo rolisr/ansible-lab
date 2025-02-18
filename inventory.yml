@@ -1,0 +1,7 @@
+# inventory.yml
+---
+rabbitmq:
+  hosts:
+    lxc:
+      ansible_host: 192.168.1.147
+      ansible_user: root

@@ -1,0 +1,6 @@
+# playbook.yml
+---
+- hosts: rabbitmq
+  become: true
+  roles:
+    - rabbitmq

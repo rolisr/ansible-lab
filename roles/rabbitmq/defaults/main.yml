@@ -1,0 +1,8 @@
+# roles/rabbitmq/defaults/main.yml
+---
+rabbitmq_vhost: "myvhost"
+rabbitmq_user: "myuser"
+# Password os defined in vault file:
+# roles/rabbitmq/vars/main.yml
+rabbitmq_open_files_limit: 100097
+erl_max_ports: 100000
