@@ -3,23 +3,28 @@
 - name: Run RabbitMQ installation script
   ansible.builtin.script: install_rabbitmq_bullseye.sh
   become: true
+
 - name: Enable RabbitMQ Management Plugin
   rabbitmq_plugin:
     names: rabbitmq_management
     state: enabled
+
 - name: Ensure RabbitMQ service is running
   service:
     name: rabbitmq-server
     state: started
     enabled: true
+
 - name: Remove guest user
   rabbitmq_user:
     user: guest
     state: absent
+
 - name: Create vhost
   rabbitmq_vhost:
     name: "{{ rabbitmq_vhost }}"
     state: present
+
 - name: Create user with privileges
   rabbitmq_user:
     user: "{{ rabbitmq_user }}"
@@ -29,30 +34,119 @@
     read_priv: .*
     write_priv: .*
     state: present
+
 - name: Create systemd override directory for RabbitMQ service limits
   ansible.builtin.file:
     path: /etc/systemd/system/rabbitmq-server.service.d
     state: directory
     mode: '0755'
-  become: true
+
 - name: Deploy systemd limits override for RabbitMQ service
   ansible.builtin.template:
     src: rabbitmq-limits.conf.j2
     dest: /etc/systemd/system/rabbitmq-server.service.d/limits.conf
     mode: '0644'
-  become: true
+
 - name: Deploy ERL_MAX_PORTS limits override for RabbitMQ service
   ansible.builtin.template:
     src: rabbitmq-env.conf.j2
     dest: /etc/rabbitmq/rabbitmq-env.conf
     mode: '0644'
-  become: true
+
 - name: Reload systemd daemon
   ansible.builtin.systemd:
     daemon_reload: true
-  become: true
+
 - name: Restart RabbitMQ service
   ansible.builtin.systemd:
     name: rabbitmq-server
     state: restarted
-  become: true
+
+- name: Ensure debconf is available for non-interactive package configuration
+  apt:
+    pkg: debconf
+    state: present
+
+#- name: Preseed iptables-persistent configuration for automatic save
+#  debconf:
+#    name: iptables-persistent
+#    question: "{{ item.question }}"
+#    value: "{{ item.value }}"
+#    vtype: "{{ item.type }}"
+#  loop:
+#    - {question: 'iptables-persistent/autosave_v4', value: 'true', type: 'boolean'}
+#    - {question: 'iptables-persistent/autosave_v6', value: 'true', type: 'boolean'}
+
+- name: Install iptables and iptables-persistent
+  apt:
+    name:
+      - iptables
+      - iptables-persistent
+    state: present
+    update_cache: true
+
+- name: Install pip3 and pika
+  apt:
+    name:
+      - python3-pip
+    state: present
+
+- name: Install pika via pip
+  pip:
+    name: pika
+    state: present
+
+- name: Configure iptables rules
+  block:
+    - name: Allow loopback interface
+      iptables:
+        chain: INPUT
+        in_interface: lo
+        jump: ACCEPT
+
+    - name: Allow RabbitMQ Management console port
+      iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: 15672
+        jump: ACCEPT
+
+    - name: Allow SSH traffic
+      iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: 22
+        jump: ACCEPT
+
+    - name: Allow established and related connections
+      iptables:
+        chain: INPUT
+        ctstate: ESTABLISHED,RELATED
+        jump: ACCEPT
+
+    - name: Set default INPUT policy to DROP
+      iptables:
+        chain: INPUT
+        policy: DROP
+
+    - name: Save iptables rules
+      shell: iptables-save > /etc/iptables/rules.v4
+      changed_when: false
+
+- name: Upload local directory to remote server
+  ansible.builtin.copy:
+    src: post-install/  # Uploads the entire directory
+    dest: post-install/
+    mode: '0755'
+
+- name: Execute the python script inside the uploaded directory
+  ansible.builtin.command:
+    cmd: /root/post-install/producer.py
+#  args:
+#   chdir: post-install/  # Ensures the script runs inside the correct directory
+  register: script_output
+  changed_when: script_output.rc != 0
+
+- name: Show script output
+  debug:
+    var: script_output.stdout_lines
